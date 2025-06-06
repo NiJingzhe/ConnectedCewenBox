@@ -4,29 +4,10 @@
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-
-  <!-- Bluetooth Permissions -->
-  <!-- Required for legacy Bluetooth operations (API level < 31) -->
-  <uses-permission android:name="android.permission.BLUETOOTH" />
-  <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-
-  <!-- Required for Bluetooth Low Energy (BLE) scanning and connecting on Android 6.0 (API level 23) and above -->
-  <!-- Also generally required for classic Bluetooth discovery -->
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-
-  <!-- Required for new Bluetooth operations (API level 31+) -->
-  <!-- Allows the app to connect to paired Bluetooth devices -->
-  <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-  <!-- Allows the app to discover and pair nearby Bluetooth devices -->
-  <!-- For apps targeting Android 12 (API level 31) and higher, -->
-  <!-- if you don't derive physical location from Bluetooth scan results, -->
-  <!-- you can declare that your app doesn't use Bluetooth to derive physical location. -->
-  <!-- Add android:usesPermissionFlags="neverForLocation" to the BLUETOOTH_SCAN permission. -->
   <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-  <!-- Allows the app to make itself discoverable to other Bluetooth devices -->
   <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
-
+  <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>

@@ -82,6 +82,9 @@ class BluetoothManager {
           permissionsToRequest.push(
             PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
             PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
+            // 某些设备制造商可能仍然需要位置权限
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
           );
         } else { // Android 11 and below
           permissionsToRequest.push(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
@@ -91,14 +94,20 @@ class BluetoothManager {
 
         if (permissionsToRequest.length === 0) return true; // No permissions needed (e.g. iOS or older Android handled by lib)
 
+        console.log('BluetoothManager: Requesting permissions:', permissionsToRequest);
         const granted = await PermissionsAndroid.requestMultiple(permissionsToRequest);
+        console.log('BluetoothManager: Permission results:', granted);
+        
         const allGranted = permissionsToRequest.every(
           (perm) => granted[perm] === PermissionsAndroid.RESULTS.GRANTED,
         );
 
         if (!allGranted) {
+          const deniedPermissions = permissionsToRequest.filter(
+            (perm) => granted[perm] !== PermissionsAndroid.RESULTS.GRANTED
+          );
+          console.warn('BluetoothManager: Denied permissions:', deniedPermissions);
           Alert.alert('Permissions Denied', 'Bluetooth permissions are required to scan and connect to devices.');
-          console.warn('Bluetooth permissions denied by user.');
         }
         return allGranted;
       } catch (err) {
@@ -345,6 +354,16 @@ class BluetoothManager {
     this.onScanStatusCallback?.(true);
 
     try {
+      // 检查权限是否仍然有效
+      const permissionsGranted = await this.requestBluetoothPermissions();
+      if (!permissionsGranted) {
+        console.warn('BluetoothManager: Scan permissions not granted');
+        Alert.alert('权限不足', '需要蓝牙权限才能扫描设备。请在设置中授予权限。');
+        this.isScanningRef = false;
+        this.onScanStatusCallback?.(false);
+        return;
+      }
+
       // Permissions and enabled status should be checked during initialize()
       // Or add a check here if initialize is not a prerequisite for scanning.
       const enabled = await RNBClassic.isBluetoothEnabled();
@@ -354,6 +373,8 @@ class BluetoothManager {
           this.onScanStatusCallback?.(false);
           return;
       }
+      
+      console.log('BluetoothManager: Starting discovery with react-native-bluetooth-classic...');
       await RNBClassic.startDiscovery();
       console.log('BluetoothManager: Discovery started successfully.');
 
@@ -364,7 +385,9 @@ class BluetoothManager {
       }, scanDurationMs);
     } catch (error) {
       console.warn('BluetoothManager: Failed to start scan:', error);
-      Alert.alert('Scan Error', `Failed to start scanning: ${(error as Error).message}`);
+      const errorMessage = (error as Error).message || 'Unknown error';
+      console.warn('BluetoothManager: Detailed scan error:', errorMessage);
+      Alert.alert('Scan Error', `Failed to start scanning: ${errorMessage}`);
       this.isScanningRef = false;
       this.onScanStatusCallback?.(false);
       if (this.scanTimeoutRef) {

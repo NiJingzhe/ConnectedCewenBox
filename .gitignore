@@ -1,6 +1,8 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 **/build
 **/.cache
+mcu/include_paths.cmake
+mcu/CMakePresets.json
 
 # dependencies
 **/node_modules/

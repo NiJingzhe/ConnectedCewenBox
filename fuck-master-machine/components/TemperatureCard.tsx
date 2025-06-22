@@ -21,6 +21,20 @@ const TemperatureCard: React.FC<TemperatureCardProps> = ({ temperature, temperat
   const [expanded, setExpanded] = React.useState(false);
   const colorScheme = useColorScheme();
   const animated = React.useRef(new Animated.Value(0)).current;
+  
+  // 调试日志：监控温度历史数据的变化
+  React.useEffect(() => {
+    console.log('=== TemperatureCard 数据更新 ===');
+    console.log(`当前温度: ${temperature}°C`);
+    console.log(`历史记录数量: ${temperatureHistory.length}`);
+    if (temperatureHistory.length > 0) {
+      const latest = temperatureHistory[temperatureHistory.length - 1];
+      const latestTime = new Date(latest.timestamp);
+      console.log(`最新历史记录: ${latest.value}°C @ ${latestTime.toLocaleString()}`);
+    }
+    console.log('==============================');
+  }, [temperature, temperatureHistory]);
+  
   React.useEffect(() => {
     Animated.timing(animated, {
       toValue: expanded ? 1 : 0,
@@ -68,6 +82,12 @@ const TemperatureCard: React.FC<TemperatureCardProps> = ({ temperature, temperat
       color: Colors[colorScheme].text,
       opacity: 0.7,
       marginTop: 4,
+    },
+    lastUpdateText: {
+      fontSize: 12,
+      color: Colors[colorScheme].text,
+      opacity: 0.5,
+      marginTop: 2,
     },
     tempChartSection: {
       flex: 1,
@@ -128,14 +148,18 @@ const TemperatureCard: React.FC<TemperatureCardProps> = ({ temperature, temperat
   return (
     <View>
       <View style={styles.tempCard}>
-        <View style={{ flex: 1 }}>
-          <View style={styles.tempValueSection}>
-            <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-              <Text style={styles.tempValue}>{temperature.toFixed(1)}</Text>
-              <Text style={styles.tempUnit}>°C</Text>
-            </View>
-            <Text style={styles.ruleLabel}>当前温度</Text>
+        <View style={{ flex: 1 }}>        <View style={styles.tempValueSection}>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+            <Text style={styles.tempValue}>{temperature.toFixed(1)}</Text>
+            <Text style={styles.tempUnit}>°C</Text>
           </View>
+          <Text style={styles.ruleLabel}>当前温度</Text>
+          {temperatureHistory.length > 0 && (
+            <Text style={styles.lastUpdateText}>
+              最后更新: {formatTime(temperatureHistory[temperatureHistory.length - 1].timestamp)}
+            </Text>
+          )}
+        </View>
         </View>
         <View style={styles.tempChartSection}>
           <Svg width={chartWidth} height={chartHeight}>

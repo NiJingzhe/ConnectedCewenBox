@@ -289,18 +289,33 @@ export class CommunicationManager {
   // 获取当前温度
   public async getCurrentTemperature(): Promise<number | null> {
     try {
+      console.log('=== 开始获取温度 ===');
       const requestData = this.protocolService.createGetTempRequest();
+      console.log('温度请求数据包:', this.protocolService.bytesToHex(requestData));
+      
       const response = await this.sendRequest(
         requestData,
         PROTOCOL_CONSTANTS.COMMANDS.GET_TEMP
       );
 
+      console.log('温度响应:', {
+        success: response.success,
+        hasData: !!response.data,
+        temperature: response.data?.temperature
+      });
+
       if (response.success && response.data?.temperature !== undefined) {
+        console.log(`温度解析成功: ${response.data.temperature}°C`);
+        console.log('==================');
         return response.data.temperature;
       }
+      
+      console.log('温度获取失败: 响应无效或无温度数据');
+      console.log('==================');
       return null;
     } catch (error) {
       console.error("Get temperature failed:", error);
+      console.log('==================');
       return null;
     }
   }

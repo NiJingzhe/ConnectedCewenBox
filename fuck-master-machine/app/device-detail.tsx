@@ -40,27 +40,8 @@ export default function DeviceDetailScreen() {
     animationOriginHeight?: string;
   }>();
 
-  const [temperature, setTemperature] = React.useState(23.5);
+  const [temperature, setTemperature] = React.useState(0.0);
   const [temperatureHistory, setTemperatureHistory] = React.useState<{ value: number; timestamp: number }[]>([
-    { value: 22.1, timestamp: 1718000000000 },
-    { value: 22.8, timestamp: 1718000600000 },
-    { value: 23.0, timestamp: 1718001200000 },
-    { value: 23.5, timestamp: 1718001800000 },
-    { value: 23.2, timestamp: 1718002400000 },
-    { value: 23.8, timestamp: 1718003000000 },
-    { value: 24.0, timestamp: 1718003600000 },
-    { value: 22.8, timestamp: 1718004200000 },
-    { value: 23.0, timestamp: 1718004800000 },
-    { value: 22.1, timestamp: 1718005400000 },
-    { value: 22.8, timestamp: 1718006000000 },
-    { value: 23.0, timestamp: 1718006600000 },
-    { value: 23.5, timestamp: 1718007200000 },
-    { value: 23.2, timestamp: 1718007800000 },
-    { value: 23.8, timestamp: 1718008400000 },
-    { value: 24.0, timestamp: 1718009000000 },
-    { value: 23.5, timestamp: 1718009600000 },
-    { value: 23.2, timestamp: 1718010200000 },
-    { value: 23.8, timestamp: 1718010800000 },
   ]);
   const [rules, setRules] = React.useState<{ min: string; max: string }[]>([
     { min: '20', max: '25' },
@@ -112,6 +93,8 @@ export default function DeviceDetailScreen() {
   const pollingTimerRef = React.useRef<number | null>(null);
   // 连接失败计数器
   const connectionFailureCountRef = React.useRef<number>(0);
+  // 设备时间偏移量（设备时间 - 本地时间）
+  const [deviceTimeOffset, setDeviceTimeOffset] = React.useState<number>(0);
 
 
 
@@ -261,6 +244,9 @@ export default function DeviceDetailScreen() {
       setIsConnected(true);
       setIsConnecting(false);
       
+      // 同步设备时间偏移量
+      await syncDeviceTime();
+      
       // 开始轮询
       startPolling();
       
@@ -326,18 +312,38 @@ export default function DeviceDetailScreen() {
       // 获取温度数据
       const temp = await communicationManager.getCurrentTemperature();
       if (temp !== null) {
+        // 使用设备时间偏移量来计算更准确的时间戳
+        const localTime = Date.now();
+        const adjustedTimestamp = localTime + deviceTimeOffset;
+        const nowDate = new Date(adjustedTimestamp);
+        
+        // 详细的调试日志
+        console.log('=== 温度轮询成功 ===');
+        console.log(`获取温度: ${temp}°C`);
+        console.log(`本地时间戳: ${localTime}`);
+        console.log(`调整时间戳: ${adjustedTimestamp} (偏移: ${deviceTimeOffset}ms)`);
+        console.log(`格式化时间: ${nowDate.toLocaleString()}`);
+        console.log('========================');
+        
+        // 更新UI显示的温度
         setTemperature(temp);
 
         // 成功获取数据，重置失败计数器
         connectionFailureCountRef.current = 0;
 
-        // 添加到历史记录
-        const now = Date.now();
+        // 添加到历史记录（使用调整后的时间戳）
         setTemperatureHistory(prev => {
-          const newHistory = [...prev, { value: temp, timestamp: now }];
-          // 只保留最近的50个数据点
-          return newHistory.slice(-50);
+          const newHistory = [...prev, { value: temp, timestamp: adjustedTimestamp }];
+          const limitedHistory = newHistory.slice(-50); // 只保留最近的50个数据点
+          
+          console.log(`历史记录更新 - 总数: ${limitedHistory.length}, 最新条目: ${temp}°C @ ${nowDate.toLocaleTimeString()}`);
+          
+          return limitedHistory;
         });
+      } else {
+        console.log('=== 温度轮询失败 ===');
+        console.log('获取温度返回null');
+        console.log('===================');
       }
 
       // 获取RTC时间（可选，用于时间同步检查）
@@ -359,6 +365,45 @@ export default function DeviceDetailScreen() {
       }
     }
   };
+
+  // 验证温度历史数据的完整性
+  const validateTemperatureHistory = () => {
+    console.log('=== 温度历史数据验证 ===');
+    console.log(`总记录数: ${temperatureHistory.length}`);
+    
+    if (temperatureHistory.length === 0) {
+      console.log('历史记录为空');
+      console.log('========================');
+      return;
+    }
+    
+    // 检查时间戳是否递增
+    let isTimeStampValid = true;
+    for (let i = 1; i < temperatureHistory.length; i++) {
+      if (temperatureHistory[i].timestamp <= temperatureHistory[i - 1].timestamp) {
+        isTimeStampValid = false;
+        console.log(`时间戳错误: 索引${i} (${temperatureHistory[i].timestamp}) <= 索引${i-1} (${temperatureHistory[i-1].timestamp})`);
+      }
+    }
+    
+    // 显示最近几条记录
+    const recentRecords = temperatureHistory.slice(-5);
+    console.log('最近5条记录:');
+    recentRecords.forEach((record, index) => {
+      const time = new Date(record.timestamp);
+      console.log(`  ${index + 1}. ${record.value}°C @ ${time.toLocaleString()}`);
+    });
+    
+    console.log(`时间戳顺序: ${isTimeStampValid ? '正确' : '错误'}`);
+    console.log('========================');
+  };
+
+  // 在组件挂载时和历史数据更新时验证
+  React.useEffect(() => {
+    if (temperatureHistory.length > 0) {
+      validateTemperatureHistory();
+    }
+  }, [temperatureHistory]);
 
   const animatedContainerStyle = useAnimatedStyle(() => {
     return {
@@ -504,6 +549,85 @@ export default function DeviceDetailScreen() {
     }
   };
 
+  const syncDeviceTime = async () => {
+    try {
+      // 记录请求开始时间
+      const requestStart = Date.now();
+      
+      // 获取设备的RTC时间
+      const rtcTime = await communicationManager.getRTCTime();
+      const rtcDate = await communicationManager.getRTCDate();
+      
+      // 记录响应结束时间
+      const requestEnd = Date.now();
+      const roundTripTime = requestEnd - requestStart;
+      
+      if (rtcTime && rtcDate) {
+        // 构造设备时间
+        const deviceTime = new Date(
+          rtcDate.year,
+          rtcDate.month - 1, // JavaScript月份从0开始
+          rtcDate.day,
+          rtcTime.hour,
+          rtcTime.minute,
+          rtcTime.second
+        ).getTime();
+        
+        // 估算设备时间（考虑网络延迟）
+        const estimatedDeviceTime = deviceTime + Math.floor(roundTripTime / 2);
+        const localTime = Date.now();
+        const offset = estimatedDeviceTime - localTime;
+        
+        setDeviceTimeOffset(offset);
+        
+        console.log('=== 设备时间同步 ===');
+        console.log(`设备时间: ${new Date(deviceTime).toLocaleString()}`);
+        console.log(`本地时间: ${new Date(localTime).toLocaleString()}`);
+        console.log(`往返时间: ${roundTripTime}ms`);
+        console.log(`时间偏移: ${offset}ms (${Math.floor(offset / 1000)}秒)`);
+        console.log('===================');
+      } else {
+        console.log('无法获取设备时间，使用本地时间');
+      }
+    } catch (error) {
+      console.error('同步设备时间失败:', error);
+    }
+  };
+
+  const manualRefreshTemperature = async () => {
+    if (!isConnected) {
+      Alert.alert('错误', '设备未连接');
+      return;
+    }
+
+    try {
+      console.log('=== 手动刷新温度 ===');
+      const temp = await communicationManager.getCurrentTemperature();
+      
+      if (temp !== null) {
+        const localTime = Date.now();
+        const adjustedTimestamp = localTime + deviceTimeOffset;
+        const nowDate = new Date(adjustedTimestamp);
+        
+        console.log(`手动获取温度成功: ${temp}°C @ ${nowDate.toLocaleString()}`);
+        
+        setTemperature(temp);
+        setTemperatureHistory(prev => {
+          const newHistory = [...prev, { value: temp, timestamp: adjustedTimestamp }];
+          return newHistory.slice(-50);
+        });
+        
+        Alert.alert('成功', `当前温度: ${temp}°C`);
+      } else {
+        console.log('手动获取温度失败');
+        Alert.alert('错误', '获取温度失败');
+      }
+      console.log('==================');
+    } catch (error) {
+      console.error('手动刷新温度失败:', error);
+      Alert.alert('错误', `获取温度失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  };
 
   const styles = StyleSheet.create({
     container: {
@@ -607,6 +731,26 @@ export default function DeviceDetailScreen() {
       fontSize: 12,
       fontWeight: '500',
     },
+    temperatureActions: {
+      flexDirection: 'row',
+      marginVertical: 8,
+      paddingHorizontal: 4,
+      gap: 8,
+    },
+    refreshButton: {
+      flex: 1,
+      height: 36,
+      backgroundColor: colors.tint,
+    },
+    validateButton: {
+      flex: 1,
+      height: 36,
+      backgroundColor: colors.tabIconDefault,
+    },
+    refreshButtonText: {
+      fontSize: 14,
+      fontWeight: '500',
+    },
   });
 
   return (
@@ -628,6 +772,9 @@ export default function DeviceDetailScreen() {
           <View style={[styles.statusIndicator, { backgroundColor: isConnected ? '#4CAF50' : '#F44336' }]} />
           <Text style={styles.statusText}>
             {isConnecting ? '连接中...' : (isConnected ? '已连接' : '未连接')}
+            {isConnected && temperatureHistory.length > 0 && (
+              ` | ${temperatureHistory.length}个数据点`
+            )}
           </Text>
           {!isConnected && !isConnecting && deviceAddress && (
             <NeumorphicButton
@@ -641,6 +788,24 @@ export default function DeviceDetailScreen() {
 
         {/* 温度数据卡片 */}
         <TemperatureCard temperature={temperature} temperatureHistory={temperatureHistory} />
+
+        {/* 温度操作按钮 */}
+        {/* {isConnected && (
+          <View style={styles.temperatureActions}>
+            <NeumorphicButton
+              title="刷新温度"
+              onPress={manualRefreshTemperature}
+              style={styles.refreshButton}
+              textStyle={styles.refreshButtonText}
+            />
+            <NeumorphicButton
+              title="验证数据"
+              onPress={validateTemperatureHistory}
+              style={styles.validateButton}
+              textStyle={styles.refreshButtonText}
+            />
+          </View>
+        )} */}
 
         {/* LED和Buzz控制开关 */}
         <View style={styles.sectionHeader}>

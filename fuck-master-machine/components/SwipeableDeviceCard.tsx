@@ -2,22 +2,22 @@ import { AppDisplayDevice } from "@/services/BluetoothManager";
 import { router } from "expo-router";
 import React, { useRef } from "react";
 import {
-    ColorSchemeName,
-    Dimensions,
-    StyleSheet,
-    Text,
-    View,
+  ColorSchemeName,
+  Dimensions,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
-    Easing,
-    Extrapolate,
-    interpolate,
-    runOnJS,
-    useAnimatedStyle,
-    useSharedValue,
-    withSpring,
-    withTiming,
+  Easing,
+  Extrapolate,
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
 } from "react-native-reanimated";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
@@ -38,10 +38,13 @@ const SwipeableDeviceCard: React.FC<SwipeableDeviceCardProps> = ({
   const translateX = useSharedValue(0);
   const currentColorScheme = colorScheme || "light";
   const cardRef = useRef<View>(null);
-  
+
   // 添加手势方向检测的状态
   const gestureDirection = useSharedValue<'none' | 'horizontal' | 'vertical'>('none');
   const startPosition = useSharedValue({ x: 0, y: 0 });
+
+  const isConnected = !!device.connectedStatus;
+  const [showNotConnected, setShowNotConnected] = React.useState(!!isConnected);
 
   const navigateToDetail = () => {
     // 尝试获取卡片的真实位置
@@ -76,12 +79,12 @@ const SwipeableDeviceCard: React.FC<SwipeableDeviceCardProps> = ({
     .onUpdate((event) => {
       const deltaX = event.translationX;
       const deltaY = event.translationY;
-      
+
       // 如果还没确定方向，根据滑动距离判断
       if (gestureDirection.value === 'none') {
         const absDeltaX = Math.abs(deltaX);
         const absDeltaY = Math.abs(deltaY);
-        
+
         // 只有当滑动距离超过阈值时才确定方向
         if (absDeltaX > 15 || absDeltaY > 15) {
           // 水平滑动距离大于垂直滑动距离，且水平滑动向左
@@ -114,23 +117,29 @@ const SwipeableDeviceCard: React.FC<SwipeableDeviceCardProps> = ({
         const shouldNavigate = Math.abs(translateX.value) > SWIPE_THRESHOLD;
 
         if (shouldNavigate) {
-          // 滑动距离超过阈值，导航到详情页
-          // 先执行一个快速的"拉伸"动画，模拟卡片被拉向详情页
-          translateX.value = withTiming(
-            -SCREEN_WIDTH * 0.9,
-            {
-              duration: 200,
-              easing: Easing.out(Easing.cubic),
-            },
-            () => {
-              runOnJS(navigateToDetail)();
-              // 立即重置位置，为下次滑动做准备
-              translateX.value = withSpring(0, {
-                damping: 40,
-                stiffness: 100,
-              });
-            }
-          );
+          if (isConnected) {
+            // 滑动距离超过阈值，导航到详情页
+            translateX.value = withTiming(
+              -SCREEN_WIDTH * 0.9,
+              {
+                duration: 200,
+                easing: Easing.out(Easing.cubic),
+              },
+              () => {
+                runOnJS(navigateToDetail)();
+                // 立即重置位置，为下次滑动做准备
+                translateX.value = withSpring(0, {
+                  damping: 40,
+                  stiffness: 100,
+                });
+              }
+            );
+          } else {
+            translateX.value = withSpring(0, {
+              damping: 40,
+              stiffness: 200,
+            });
+          }
         } else {
           // 滑动距离不够，回弹
           translateX.value = withSpring(0, {
@@ -139,7 +148,7 @@ const SwipeableDeviceCard: React.FC<SwipeableDeviceCardProps> = ({
           });
         }
       }
-      
+
       // 重置方向
       gestureDirection.value = 'none';
     })
@@ -200,7 +209,11 @@ const SwipeableDeviceCard: React.FC<SwipeableDeviceCardProps> = ({
       top: 0,
       bottom: 0,
       width: SCREEN_WIDTH,
-      backgroundColor: currentColorScheme === "light" ? "#4CAF50" : "#2E7D32",
+      backgroundColor: !isConnected
+        ? "#F44336"
+        : currentColorScheme === "light"
+          ? "#4CAF50"
+          : "#2E7D32",
       justifyContent: "center",
       alignItems: "flex-end",
       paddingRight: 40,
@@ -214,10 +227,11 @@ const SwipeableDeviceCard: React.FC<SwipeableDeviceCardProps> = ({
     },
     backgroundText: {
       color: "white",
-      fontSize: 16,
+      fontSize: 14,
       fontWeight: "600",
-      marginTop: 8,
+      textAlign: "center",
     },
+
     backgroundIcon: {
       color: "white",
       fontSize: 28,
@@ -232,6 +246,7 @@ const SwipeableDeviceCard: React.FC<SwipeableDeviceCardProps> = ({
       fontSize: 20,
       marginHorizontal: 2,
     },
+
   });
 
   return (
@@ -239,11 +254,17 @@ const SwipeableDeviceCard: React.FC<SwipeableDeviceCardProps> = ({
       {/* 背景提示 */}
       <Animated.View style={[styles.backgroundContainer, backgroundStyle]}>
         <View style={styles.backgroundContent}>
-          <Text style={styles.backgroundText}>查看详情</Text>
+          <Text style={styles.backgroundText}>
+            {!isConnected ? "点击卡片以连接" : "滑动查看详情"}
+          </Text>
           <Animated.View style={[styles.arrowContainer, arrowStyle]}>
-            <Text style={styles.arrow}>››</Text>
-            <Text style={styles.arrow}>››</Text>
-            <Text style={styles.arrow}>››</Text>
+            {isConnected && (
+              <>
+                <Text style={styles.arrow}>››</Text>
+                <Text style={styles.arrow}>››</Text>
+                <Text style={styles.arrow}>››</Text>
+              </>
+            )}
           </Animated.View>
         </View>
       </Animated.View>

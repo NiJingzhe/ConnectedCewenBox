@@ -1,10 +1,8 @@
-import { BluetoothDevice } from 'react-native-bluetooth-classic';
-
 // 协议常量
 export const PROTOCOL_CONSTANTS = {
   START_BYTES: [0xAA, 0x55],
   END_BYTES: [0x55, 0xAA],
-  VERSION: 0x01,
+  VERSION: 0x02, // 更新版本号为0x02
   PACKET_TYPES: {
     HOST_REQUEST: 0x00,
     HOST_RESPONSE: 0x01,
@@ -23,6 +21,10 @@ export const PROTOCOL_CONSTANTS = {
     GET_ALARMS: 'galm',
     SET_ALARMS: 'salm',
     GET_LOG: 'glog',
+    SET_LED: 'sled',
+    RESET_LED: 'rled',
+    SET_BUZZER: 'sbzr',
+    RESET_BUZZER: 'rbzr',
   },
   STATUS_CODES: {
     OK: 0x00,
@@ -94,10 +96,10 @@ export interface TemperatureLog {
 export class ProtocolService {
   private packetCounter = 0;
   private readonly MAX_PACKET_NUMBER = 0x7F;
-  
+
   // STM32 CRC32 实现（需要与硬件一致）
   private crc32Table: number[] = [];
-  
+
   constructor() {
     this.initCRC32Table();
   }
@@ -105,7 +107,7 @@ export class ProtocolService {
   private initCRC32Table(): void {
     // STM32 CRC32 多项式：0x04C11DB7
     const polynomial = 0x04C11DB7;
-    
+
     for (let i = 0; i < 256; i++) {
       let crc = i << 24;
       for (let j = 0; j < 8; j++) {
@@ -121,12 +123,12 @@ export class ProtocolService {
 
   private calculateCRC32(data: Uint8Array): number {
     let crc = 0xFFFFFFFF;
-    
+
     for (let i = 0; i < data.length; i++) {
       const index = ((crc >>> 24) ^ data[i]) & 0xFF;
       crc = ((crc << 8) ^ this.crc32Table[index]) >>> 0;
     }
-    
+
     return crc ^ 0xFFFFFFFF;
   }
 
@@ -183,17 +185,17 @@ export class ProtocolService {
 
     const result = new Uint8Array(4 + valueBytes.length);
     const view = new DataView(result.buffer);
-    
+
     // Tag (2 bytes)
     result[0] = tag.charCodeAt(0);
     result[1] = tag.charCodeAt(1);
-    
+
     // Length (2 bytes, little-endian)
     view.setUint16(2, valueBytes.length, true);
-    
+
     // Value
     result.set(valueBytes, 4);
-    
+
     return result;
   }
 
@@ -206,7 +208,7 @@ export class ProtocolService {
     const view = new DataView(data.buffer, data.byteOffset + offset);
     const tag = String.fromCharCode(data[offset], data[offset + 1]);
     const length = view.getUint16(2, true); // little-endian
-    
+
     if (offset + 4 + length > data.length) {
       throw new Error('TLV data too short for value');
     }
@@ -234,8 +236,8 @@ export class ProtocolService {
         value = new DataView(valueBytes.buffer, valueBytes.byteOffset).getUint16(0, true);
         break;
       case 'TS':
-      case 'TS1':
-      case 'TS2':
+      case 'T1': // 根据新协议更新标签
+      case 'T2': // 根据新协议更新标签
         value = Number(new DataView(valueBytes.buffer, valueBytes.byteOffset).getBigUint64(0, true));
         break;
       case 'L ':
@@ -248,8 +250,10 @@ export class ProtocolService {
       case 'ED':
         value = new TextDecoder('utf-8').decode(valueBytes);
         break;
+      case 'DA': // 新的数据字段
       case 'AL':
       case 'LG':
+      case 'IT': // 新的项目标签
         // 嵌套TLV数组
         value = [];
         let nestedOffset = 0;
@@ -274,13 +278,13 @@ export class ProtocolService {
   // 编码数据包
   private encodePacket(type: number, data: TLVField[], responseNumber: number = 0): Uint8Array {
     const packetNumber = this.getNextPacketNumber();
-    
+
     // 编码数据部分
     const dataBytes: Uint8Array[] = [];
     for (const field of data) {
       dataBytes.push(this.encodeTLV(field.tag, field.value));
     }
-    
+
     const totalDataLength = dataBytes.reduce((sum, bytes) => sum + bytes.length, 0);
     const dataBuffer = new Uint8Array(totalDataLength);
     let offset = 0;
@@ -289,50 +293,52 @@ export class ProtocolService {
       offset += bytes.length;
     }
 
-    // 计算CRC32（不包含起始符、版本、数据长度、CRC32和结束符）
-    const crcData = new Uint8Array(1 + 2 + 2 + totalDataLength); // 类别 + 包编号 + 响应编号 + 数据
-    crcData[0] = type;
-    new DataView(crcData.buffer).setUint16(1, packetNumber, true);
-    new DataView(crcData.buffer).setUint16(3, responseNumber, true);
-    crcData.set(dataBuffer, 5);
-    
+    // 计算CRC32（包含版本、类别、包编号、响应编号、数据长度、数据内容，但不包含起始符、CRC32和结束符）
+    const crcData = new Uint8Array(1 + 1 + 2 + 2 + 2 + totalDataLength); // 版本 + 类别 + 包编号 + 响应编号 + 数据长度 + 数据
+    crcData[0] = PROTOCOL_CONSTANTS.VERSION;
+    crcData[1] = type;
+    new DataView(crcData.buffer).setUint16(2, packetNumber, true);
+    new DataView(crcData.buffer).setUint16(4, responseNumber, true);
+    new DataView(crcData.buffer).setUint16(6, totalDataLength, true);
+    crcData.set(dataBuffer, 8);
+
     const crc32 = this.calculateCRC32(crcData);
 
     // 构建完整数据包
-    const packet = new Uint8Array(2 + 1 + 1 + 2 + 2 + 2 + 4 + totalDataLength + 2);
+    const packet = new Uint8Array(2 + 1 + 1 + 2 + 2 + 2 + totalDataLength + 4 + 2);
     const view = new DataView(packet.buffer);
     let pos = 0;
 
     // 起始符
     packet[pos++] = PROTOCOL_CONSTANTS.START_BYTES[0];
     packet[pos++] = PROTOCOL_CONSTANTS.START_BYTES[1];
-    
+
     // 版本
     packet[pos++] = PROTOCOL_CONSTANTS.VERSION;
-    
+
     // 类别
     packet[pos++] = type;
-    
+
     // 数据包编号
     view.setUint16(pos, packetNumber, true);
     pos += 2;
-    
+
     // 响应编号
     view.setUint16(pos, responseNumber, true);
     pos += 2;
-    
+
     // 数据长度
     view.setUint16(pos, totalDataLength, true);
     pos += 2;
-    
-    // CRC32
-    view.setUint32(pos, crc32, true);
-    pos += 4;
-    
+
     // 数据内容
     packet.set(dataBuffer, pos);
     pos += totalDataLength;
-    
+
+    // CRC32
+    view.setUint32(pos, crc32, true);
+    pos += 4;
+
     // 结束符
     packet[pos++] = PROTOCOL_CONSTANTS.END_BYTES[0];
     packet[pos++] = PROTOCOL_CONSTANTS.END_BYTES[1];
@@ -350,67 +356,69 @@ export class ProtocolService {
     let pos = 0;
 
     // 检查起始符
-    if (buffer[pos] !== PROTOCOL_CONSTANTS.START_BYTES[0] || 
-        buffer[pos + 1] !== PROTOCOL_CONSTANTS.START_BYTES[1]) {
+    if (buffer[pos] !== PROTOCOL_CONSTANTS.START_BYTES[0] ||
+      buffer[pos + 1] !== PROTOCOL_CONSTANTS.START_BYTES[1]) {
       throw new Error('Invalid start bytes');
     }
     pos += 2;
 
     // 版本
     const version = buffer[pos++];
-    
+
     // 类别
     const type = buffer[pos++];
-    
+
     // 数据包编号
     const packetNumber = view.getUint16(pos, true);
     pos += 2;
-    
+
     // 响应编号
     const responseNumber = view.getUint16(pos, true);
     pos += 2;
-    
+
     // 数据长度
     const dataLength = view.getUint16(pos, true);
     pos += 2;
-    
-    // CRC32
-    const receivedCRC = view.getUint32(pos, true);
-    pos += 4;
 
-    // 检查包长度
-    if (buffer.length < pos + dataLength + 2) {
+    // 检查包长度（数据内容 + CRC32 + 结束符）
+    if (buffer.length < pos + dataLength + 4 + 2) {
       throw new Error('Packet length mismatch');
-    }
-
-    // 验证CRC32
-    const crcData = new Uint8Array(1 + 2 + 2 + dataLength);
-    crcData[0] = type;
-    new DataView(crcData.buffer).setUint16(1, packetNumber, true);
-    new DataView(crcData.buffer).setUint16(3, responseNumber, true);
-    crcData.set(buffer.slice(pos, pos + dataLength), 5);
-    
-    const calculatedCRC = this.calculateCRC32(crcData);
-    if (calculatedCRC !== receivedCRC) {
-      throw new Error('CRC32 mismatch');
     }
 
     // 解析数据部分
     const dataBuffer = buffer.slice(pos, pos + dataLength);
     const data: TLVField[] = [];
     let dataOffset = 0;
-    
+
     while (dataOffset < dataBuffer.length) {
       const result = this.decodeTLV(dataBuffer, dataOffset);
       data.push(result.field);
       dataOffset = result.nextOffset;
     }
-    
+
     pos += dataLength;
 
+    // CRC32（现在在数据内容之后）
+    const receivedCRC = view.getUint32(pos, true);
+    pos += 4;
+
+    // 验证CRC32（包含版本、类别、包编号、响应编号、数据长度、数据内容）
+    const crcData = new Uint8Array(1 + 1 + 2 + 2 + 2 + dataLength);
+    crcData[0] = version;
+    crcData[1] = type;
+    new DataView(crcData.buffer).setUint16(2, packetNumber, true);
+    new DataView(crcData.buffer).setUint16(4, responseNumber, true);
+    new DataView(crcData.buffer).setUint16(6, dataLength, true);
+    crcData.set(dataBuffer, 8);
+
+    const calculatedCRC = this.calculateCRC32(crcData);
+    if (calculatedCRC !== receivedCRC) {
+      throw new Error('CRC32 mismatch');
+    }
+
     // 检查结束符
-    if (buffer[pos] !== PROTOCOL_CONSTANTS.END_BYTES[0] || 
-        buffer[pos + 1] !== PROTOCOL_CONSTANTS.END_BYTES[1]) {
+    if (buffer[pos] !== PROTOCOL_CONSTANTS.END_BYTES[0] ||
+      buffer[pos + 1] !== PROTOCOL_CONSTANTS.END_BYTES[1]) {
       throw new Error('Invalid end bytes');
     }
 
@@ -428,28 +436,32 @@ export class ProtocolService {
   // Ping命令
   public createPingRequest(): Uint8Array {
     return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, [
-      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.PING }
+      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.PING },
+      { tag: 'DA', value: [] } // 空的数据参数
     ]);
   }
 
   // 获取温度
   public createGetTempRequest(): Uint8Array {
     return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, [
-      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.GET_TEMP }
+      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.GET_TEMP },
+      { tag: 'DA', value: [] } // 空的数据参数
     ]);
   }
 
   // 获取RTC日期
   public createGetRTCDateRequest(): Uint8Array {
     return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, [
-      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.GET_RTC_DATE }
+      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.GET_RTC_DATE },
+      { tag: 'DA', value: [] } // 空的数据参数
     ]);
   }
 
   // 获取RTC时间
   public createGetRTCTimeRequest(): Uint8Array {
     return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, [
-      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.GET_RTC_TIME }
+      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.GET_RTC_TIME },
+      { tag: 'DA', value: [] } // 空的数据参数
     ]);
   }
 
@@ -457,10 +469,12 @@ export class ProtocolService {
   public createSetRTCDateRequest(date: RTCDate): Uint8Array {
     return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, [
       { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.SET_RTC_DATE },
-      { tag: 'YY', value: date.year },
-      { tag: 'MM', value: date.month },
-      { tag: 'DD', value: date.day },
-      { tag: 'WK', value: date.weekday }
+      { tag: 'DA', value: [
+        { tag: 'YY', value: date.year },
+        { tag: 'MM', value: date.month },
+        { tag: 'DD', value: date.day },
+        { tag: 'WK', value: date.weekday }
+      ]}
     ]);
   }
 
@@ -468,23 +482,26 @@ export class ProtocolService {
   public createSetRTCTimeRequest(time: RTCTime): Uint8Array {
     return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, [
       { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.SET_RTC_TIME },
-      { tag: 'HH', value: time.hour },
-      { tag: 'MM', value: time.minute },
-      { tag: 'SS', value: time.second }
+      { tag: 'DA', value: [
+        { tag: 'HH', value: time.hour },
+        { tag: 'MM', value: time.minute },
+        { tag: 'SS', value: time.second }
+      ]}
     ]);
   }
 
   // 获取报警配置
   public createGetAlarmsRequest(): Uint8Array {
     return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, [
-      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.GET_ALARMS }
+      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.GET_ALARMS },
+      { tag: 'DA', value: [] } // 空的数据参数
     ]);
   }
 
   // 设置报警配置
   public createSetAlarmsRequest(alarms: AlarmConfig[]): Uint8Array {
     const alarmTLVs = alarms.map(alarm => ({
-      tag: 'AL',
+      tag: 'IT',
       value: [
         { tag: 'ID', value: alarm.id },
         { tag: 'L ', value: alarm.lowTemp },
@@ -494,35 +511,71 @@ export class ProtocolService {
 
     return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, [
       { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.SET_ALARMS },
-      ...alarmTLVs
+      { tag: 'DA', value: [
+        { tag: 'AL', value: alarmTLVs }
+      ]}
     ]);
   }
 
   // 获取温度日志
   public createGetLogRequest(startTimestamp: number, endTimestamp: number, maxCount?: number): Uint8Array {
-    const data: TLVField[] = [
-      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.GET_LOG },
-      { tag: 'TS1', value: startTimestamp },
-      { tag: 'TS2', value: endTimestamp }
+    const dataParams: TLVField[] = [
+      { tag: 'T1', value: startTimestamp },
+      { tag: 'T2', value: endTimestamp }
     ];
 
     if (maxCount !== undefined) {
-      data.push({ tag: 'MX', value: maxCount });
+      dataParams.push({ tag: 'MX', value: maxCount });
     }
 
-    return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, data);
+    return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, [
+      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.GET_LOG },
+      { tag: 'DA', value: dataParams }
+    ]);
+  }
+
+  // 设置LED状态
+  public createSetLEDRequest(): Uint8Array {
+    return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, [
+      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.SET_LED },
+      { tag: 'DA', value: [] } // 空的数据参数
+    ]);
+  }
+
+  // 重置LED状态
+  public createResetLEDRequest(): Uint8Array {
+    return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, [
+      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.RESET_LED },
+      { tag: 'DA', value: [] } // 空的数据参数
+    ]);
+  }
+
+  // 设置蜂鸣器状态
+  public createSetBuzzerRequest(): Uint8Array {
+    return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, [
+      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.SET_BUZZER },
+      { tag: 'DA', value: [] } // 空的数据参数
+    ]);
+  }
+
+  // 重置蜂鸣器状态
+  public createResetBuzzerRequest(): Uint8Array {
+    return this.encodePacket(PROTOCOL_CONSTANTS.PACKET_TYPES.HOST_REQUEST, [
+      { tag: 'IN', value: PROTOCOL_CONSTANTS.COMMANDS.RESET_BUZZER },
+      { tag: 'DA', value: [] } // 空的数据参数
+    ]);
   }
 
   // 解析响应
   public parseResponse(buffer: Uint8Array): ParsedResponse {
     try {
       const packet = this.decodePacket(buffer);
-      
+
       // 检查是否为错误响应
       if (packet.type === PROTOCOL_CONSTANTS.PACKET_TYPES.DEVICE_ERROR) {
         const errorCode = packet.data.find(field => field.tag === 'EC')?.value;
         const errorDescription = packet.data.find(field => field.tag === 'ED')?.value;
-        
+
         return {
           success: false,
           error: {
@@ -535,7 +588,7 @@ export class ProtocolService {
       // 解析正常响应
       const command = packet.data.find(field => field.tag === 'IN')?.value;
       const status = packet.data.find(field => field.tag === 'ST')?.value;
-      
+
       if (status !== PROTOCOL_CONSTANTS.STATUS_CODES.OK) {
         return {
           success: false,
@@ -547,56 +600,84 @@ export class ProtocolService {
         };
       }
 
+      // 获取DA字段（数据部分）
+      const dataField = packet.data.find(field => field.tag === 'DA');
+      const dataContent = dataField?.value || [];
+
       // 根据命令类型解析数据
       let responseData: any = {};
-      
+
       switch (command) {
         case PROTOCOL_CONSTANTS.COMMANDS.PING:
           responseData = { ping: 'pong' };
           break;
-          
+
         case PROTOCOL_CONSTANTS.COMMANDS.GET_TEMP:
-          responseData.temperature = packet.data.find(field => field.tag === 'T ')?.value;
+          responseData.temperature = this.findTLVValue(dataContent, 'T ');
           break;
-          
+
         case PROTOCOL_CONSTANTS.COMMANDS.GET_RTC_DATE:
           responseData.date = {
-            year: packet.data.find(field => field.tag === 'YY')?.value,
-            month: packet.data.find(field => field.tag === 'MM')?.value,
-            day: packet.data.find(field => field.tag === 'DD')?.value,
-            weekday: packet.data.find(field => field.tag === 'WK')?.value
+            year: this.findTLVValue(dataContent, 'YY'),
+            month: this.findTLVValue(dataContent, 'MM'),
+            day: this.findTLVValue(dataContent, 'DD'),
+            weekday: this.findTLVValue(dataContent, 'WK')
           };
           break;
-          
+
         case PROTOCOL_CONSTANTS.COMMANDS.GET_RTC_TIME:
           responseData.time = {
-            hour: packet.data.find(field => field.tag === 'HH')?.value,
-            minute: packet.data.find(field => field.tag === 'MM')?.value,
-            second: packet.data.find(field => field.tag === 'SS')?.value
+            hour: this.findTLVValue(dataContent, 'HH'),
+            minute: this.findTLVValue(dataContent, 'MM'),
+            second: this.findTLVValue(dataContent, 'SS')
           };
           break;
-          
+
         case PROTOCOL_CONSTANTS.COMMANDS.GET_ALARMS:
-          const alarmFields = packet.data.filter(field => field.tag === 'AL');
-          responseData.alarms = alarmFields.map((alarmField: any) => {
-            const alarmData = alarmField.value;
-            return {
-              id: alarmData.find((f: any) => f.tag === 'ID')?.value,
-              lowTemp: alarmData.find((f: any) => f.tag === 'L ')?.value,
-              highTemp: alarmData.find((f: any) => f.tag === 'H ')?.value
-            };
-          });
+          const alarmArray = this.findTLVValue(dataContent, 'AL');
+          if (alarmArray && Array.isArray(alarmArray)) {
+            responseData.alarms = alarmArray.map((alarmItem: any) => {
+              const itemData = alarmItem.value;
+              return {
+                id: this.findTLVValue(itemData, 'ID'),
+                lowTemp: this.findTLVValue(itemData, 'L '),
+                highTemp: this.findTLVValue(itemData, 'H ')
+              };
+            });
+          } else {
+            responseData.alarms = [];
+          }
           break;
-          
+
         case PROTOCOL_CONSTANTS.COMMANDS.GET_LOG:
-          const logFields = packet.data.filter(field => field.tag === 'LG');
-          responseData.logs = logFields.map((logField: any) => {
-            const logData = logField.value;
-            return {
-              timestamp: logData.find((f: any) => f.tag === 'TS')?.value,
-              temperature: logData.find((f: any) => f.tag === 'T ')?.value
-            };
-          });
+          const logArray = this.findTLVValue(dataContent, 'LG');
+          if (logArray && Array.isArray(logArray)) {
+            responseData.logs = logArray.map((logItem: any) => {
+              const itemData = logItem.value;
+              return {
+                timestamp: this.findTLVValue(itemData, 'TS'),
+                temperature: this.findTLVValue(itemData, 'T ')
+              };
+            });
+          } else {
+            responseData.logs = [];
+          }
+          break;
+
+        case PROTOCOL_CONSTANTS.COMMANDS.SET_LED:
+          responseData = { led: 'set' };
+          break;
+
+        case PROTOCOL_CONSTANTS.COMMANDS.RESET_LED:
+          responseData = { led: 'reset' };
+          break;
+
+        case PROTOCOL_CONSTANTS.COMMANDS.SET_BUZZER:
+          responseData = { buzzer: 'set' };
+          break;
+
+        case PROTOCOL_CONSTANTS.COMMANDS.RESET_BUZZER:
+          responseData = { buzzer: 'reset' };
           break;
       }
 
@@ -606,7 +687,7 @@ export class ProtocolService {
         status,
         data: responseData
       };
-      
+
     } catch (error) {
       return {
         success: false,
@@ -616,6 +697,13 @@ export class ProtocolService {
         }
       };
     }
+  }
+
+  // 辅助方法：在TLV数组中查找指定tag的值
+  private findTLVValue(tlvArray: any[], tag: string): any {
+    if (!Array.isArray(tlvArray)) return undefined;
+    const field = tlvArray.find((item: any) => item.tag === tag);
+    return field?.value;
   }
 
   // 工具方法：将Uint8Array转换为十六进制字符串（用于调试）
@@ -633,6 +721,66 @@ export class ProtocolService {
       bytes[i / 2] = parseInt(hexString.substr(i, 2), 16);
     }
     return bytes;
+  }
+
+  // 调试方法：显示数据包结构
+  public debugPacketStructure(packet: Uint8Array): string {
+    if (packet.length < 16) {
+      return 'Packet too short';
+    }
+
+    const view = new DataView(packet.buffer, packet.byteOffset);
+    let pos = 0;
+    let result = 'Packet structure:\n';
+
+    // 起始符
+    result += `Start bytes: ${packet[pos].toString(16).padStart(2, '0')} ${packet[pos + 1].toString(16).padStart(2, '0')}\n`;
+    pos += 2;
+
+    // 版本
+    result += `Version: ${packet[pos].toString(16).padStart(2, '0')}\n`;
+    pos++;
+
+    // 类别
+    result += `Type: ${packet[pos].toString(16).padStart(2, '0')}\n`;
+    pos++;
+
+    // 数据包编号
+    const packetNumber = view.getUint16(pos, true);
+    result += `Packet number: ${packetNumber.toString(16).padStart(4, '0')}\n`;
+    pos += 2;
+
+    // 响应编号
+    const responseNumber = view.getUint16(pos, true);
+    result += `Response number: ${responseNumber.toString(16).padStart(4, '0')}\n`;
+    pos += 2;
+
+    // 数据长度
+    const dataLength = view.getUint16(pos, true);
+    result += `Data length: ${dataLength}\n`;
+    pos += 2;
+
+    // 数据内容
+    if (dataLength > 0) {
+      const dataBytes = Array.from(packet.slice(pos, pos + dataLength))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join(' ');
+      result += `Data: ${dataBytes}\n`;
+    }
+    pos += dataLength;
+
+    // CRC32
+    const crc32 = view.getUint32(pos, true);
+    result += `CRC32: ${crc32.toString(16).padStart(8, '0')}\n`;
+    pos += 4;
+
+    // 结束符
+    result += `End bytes: ${packet[pos].toString(16).padStart(2, '0')} ${packet[pos + 1].toString(16).padStart(2, '0')}\n`;
+
+    // 完整数据包（十六进制）
+    result += `Full packet (hex): ${Array.from(packet).map(b => b.toString(16).padStart(2, '0')).join(' ')}\n`;
+
+    return result;
   }
 }
 

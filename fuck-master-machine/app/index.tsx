@@ -1,6 +1,6 @@
 import useColorScheme from '@/hooks/useColorScheme';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, FlatList, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DeviceCard from '../components/DeviceCard';
 import NeumorphicButton from '../components/NeumorphicButton';
@@ -52,55 +52,107 @@ export default function Index() {
       }
     });
 
-    bluetoothManager.setOnConnectionStatusListener((deviceAddress, status, error) => {
-      console.log(`UI: Connection Status Update for ${deviceAddress} - ${status}`);
-      setIsConnecting(null);
+    const setupConnectionListener = () => {
+      bluetoothManager.setOnConnectionStatusListener((deviceAddress, status, error) => {
+        console.log(`UI: Connection Status Update for ${deviceAddress} - ${status}`);
+        setIsConnecting(null);
 
-      if (status === 'connected') {
-        //Alert.alert("Connected", `Successfully connected to device ${deviceAddress}.`);
-        
-        // Immediately show connected status for better UX
-        setPairedDevices(prev => {
-          // If device already exists in paired list, update it
-          const existingDevice = prev.find(d => d.address === deviceAddress);
-          if (existingDevice) {
-            return prev.map(d => d.address === deviceAddress ? { ...d, connectedStatus: true } : d);
-          }
-          
-          // If device doesn't exist, we'll add it when getPairedDevices() is called
-          return prev;
-        });
-        
-        // Remove from discovered devices
-        setDiscoveredDevices(prev => prev.filter(d => d.address !== deviceAddress));
-        
-        // Add a small delay to ensure Bluetooth stack has updated the connection status
-        setTimeout(() => {
-          bluetoothManager.getPairedDevices();
-        }, 500);
-      } else if (status === 'disconnected') {
-        //Alert.alert("Disconnected", `Device ${deviceAddress} has disconnected.`);
-        // Update paired devices to show disconnected status immediately
-        setPairedDevices(prev => prev.map(d => d.address === deviceAddress ? { ...d, connectedStatus: false } : d));
-        // Also refresh from Bluetooth stack to ensure accuracy
-        setTimeout(() => {
-          bluetoothManager.getPairedDevices();
-        }, 500);
-      } else if (status === 'error') {
-        // BluetoothManager now handles error alerts with retry logic,
-        // so we just update the UI state without showing duplicate alerts
-        console.log(`UI: Connection error for ${deviceAddress}: ${error?.message}`);
-        
-        // Update both lists to show error/disconnected status
-        setPairedDevices(prev => prev.map(d => d.address === deviceAddress ? { ...d, connectedStatus: false } : d));
-        setDiscoveredDevices(prev => prev.map(d => d.address === deviceAddress ? { ...d, connectedStatus: false } : d));
-      }
-    });
+        if (status === 'connected') {
+          //Alert.alert("Connected", `Successfully connected to device ${deviceAddress}.`);
+
+          // Immediately show connected status for better UX
+          setPairedDevices(prev => {
+            // If device already exists in paired list, update it
+            const existingDevice = prev.find(d => d.address === deviceAddress);
+            if (existingDevice) {
+              return prev.map(d => d.address === deviceAddress ? { ...d, connectedStatus: true } : d);
+            }
+
+            // If device doesn't exist, we'll add it when getPairedDevices() is called
+            return prev;
+          });
+
+          // Remove from discovered devices
+          setDiscoveredDevices(prev => prev.filter(d => d.address !== deviceAddress));
+
+          // Add a small delay to ensure Bluetooth stack has updated the connection status
+          setTimeout(() => {
+            bluetoothManager.getPairedDevices();
+          }, 500);
+        } else if (status === 'disconnected') {
+          //Alert.alert("Disconnected", `Device ${deviceAddress} has disconnected.`);
+          // Update paired devices to show disconnected status immediately
+          setPairedDevices(prev => prev.map(d => d.address === deviceAddress ? { ...d, connectedStatus: false } : d));
+          // Also refresh from Bluetooth stack to ensure accuracy
+          setTimeout(() => {
+            bluetoothManager.getPairedDevices();
+          }, 500);
+        } else if (status === 'error') {
+          // BluetoothManager now handles error alerts with retry logic,
+          // so we just update the UI state without showing duplicate alerts
+          console.log(`UI: Connection error for ${deviceAddress}: ${error?.message}`);
+
+          // Update both lists to show error/disconnected status
+          setPairedDevices(prev => prev.map(d => d.address === deviceAddress ? { ...d, connectedStatus: false } : d));
+          setDiscoveredDevices(prev => prev.map(d => d.address === deviceAddress ? { ...d, connectedStatus: false } : d));
+        }
+      });
+    };
+
+    // 初始设置监听器
+    setupConnectionListener();
 
     bluetoothManager.initialize();
 
     return () => {
       bluetoothManager.cleanup();
+    };
+  }, []);
+
+  // 确保在应用状态变化时重新设置连接监听器
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: string) => {
+      console.log('应用状态变化:', nextAppState);
+      if (nextAppState === 'active') {
+        console.log('应用变为活跃状态，重新设置连接监听器');
+        // 重新设置连接状态监听器，防止被其他页面覆盖
+        bluetoothManager.setOnConnectionStatusListener((deviceAddress, status, error) => {
+          console.log(`UI: Connection Status Update for ${deviceAddress} - ${status}`);
+          setIsConnecting(null);
+
+          if (status === 'connected') {
+            setPairedDevices(prev => {
+              const existingDevice = prev.find(d => d.address === deviceAddress);
+              if (existingDevice) {
+                return prev.map(d => d.address === deviceAddress ? { ...d, connectedStatus: true } : d);
+              }
+              return prev;
+            });
+
+            setDiscoveredDevices(prev => prev.filter(d => d.address !== deviceAddress));
+
+            setTimeout(() => {
+              bluetoothManager.getPairedDevices();
+            }, 500);
+          } else if (status === 'disconnected') {
+            setPairedDevices(prev => prev.map(d => d.address === deviceAddress ? { ...d, connectedStatus: false } : d));
+            setTimeout(() => {
+              bluetoothManager.getPairedDevices();
+            }, 500);
+          } else if (status === 'error') {
+            console.log(`UI: Connection error for ${deviceAddress}: ${error?.message}`);
+            setPairedDevices(prev => prev.map(d => d.address === deviceAddress ? { ...d, connectedStatus: false } : d));
+            setDiscoveredDevices(prev => prev.map(d => d.address === deviceAddress ? { ...d, connectedStatus: false } : d));
+          }
+        });
+      }
+    };
+
+    // 监听应用状态变化
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      subscription?.remove();
     };
   }, []);
 
@@ -229,10 +281,10 @@ export default function Index() {
 
     return (
       <SwipeableDeviceCard device={item} colorScheme={colorScheme}>
-        <DeviceCard 
-          device={item} 
-          onConnect={handleConnectAttempt} 
-          onDisconnect={handleDisconnectDevice} 
+        <DeviceCard
+          device={item}
+          onConnect={handleConnectAttempt}
+          onDisconnect={handleDisconnectDevice}
           isConnecting={isCurrentlyConnecting}
           disabled={isAnyDeviceConnecting && !isCurrentlyConnecting} // 其他设备连接时禁用
           colorScheme={colorScheme}
@@ -240,7 +292,7 @@ export default function Index() {
       </SwipeableDeviceCard>
     );
   };
-  
+
   let bluetoothMessage = "";
   if (bluetoothStatus === 'initializing') {
     bluetoothMessage = "正在初始化蓝牙...";
@@ -254,16 +306,16 @@ export default function Index() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom', 'left', 'right']}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 20 }} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>设备管理</Text>
-        
+
         {bluetoothStatus !== 'initialized' && bluetoothStatus !== 'initializing' && (
           <View style={styles.bluetoothStatusContainer}>
             <Text style={styles.bluetoothStatusText}>{bluetoothMessage}</Text>
-            {bluetoothStatus === 'disabled' && 
-              <NeumorphicButton 
-                title="打开蓝牙设置" 
-                onPress={() => bluetoothManager.openBluetoothSettings()} 
+            {bluetoothStatus === 'disabled' &&
+              <NeumorphicButton
+                title="打开蓝牙设置"
+                onPress={() => bluetoothManager.openBluetoothSettings()}
               />
             }
           </View>
@@ -310,17 +362,17 @@ export default function Index() {
           )}
         </View>
 
-        <View style={styles.discoveredListContainer}> 
+        <View style={styles.discoveredListContainer}>
           {discoveredDevices.length > 0 ? (
             discoveredDevices.map((item) => {
               const isCurrentlyConnecting = !!isConnecting && isConnecting === item.address;
               const isAnyDeviceConnecting = !!isConnecting; // 检查是否有任何设备正在连接
               return (
                 <SwipeableDeviceCard key={item.address} device={item} colorScheme={colorScheme}>
-                  <DeviceCard 
-                    device={item} 
-                    onConnect={handleConnectAttempt} 
-                    onDisconnect={handleDisconnectDevice} 
+                  <DeviceCard
+                    device={item}
+                    onConnect={handleConnectAttempt}
+                    onDisconnect={handleDisconnectDevice}
                     isConnecting={isCurrentlyConnecting}
                     disabled={isAnyDeviceConnecting && !isCurrentlyConnecting} // 其他设备连接时禁用
                     colorScheme={colorScheme}

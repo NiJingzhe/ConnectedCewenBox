@@ -465,6 +465,66 @@ export class CommunicationManager {
     return this.getTemperatureLogs(startTimestamp, endTimestamp);
   }
 
+  // 设置LED状态
+  public async setLED(): Promise<boolean> {
+    try {
+      const requestData = this.protocolService.createSetLEDRequest();
+      const response = await this.sendRequest(
+        requestData,
+        PROTOCOL_CONSTANTS.COMMANDS.SET_LED
+      );
+      return response.success;
+    } catch (error) {
+      console.error("Set LED failed:", error);
+      return false;
+    }
+  }
+
+  // 重置LED状态
+  public async resetLED(): Promise<boolean> {
+    try {
+      const requestData = this.protocolService.createResetLEDRequest();
+      const response = await this.sendRequest(
+        requestData,
+        PROTOCOL_CONSTANTS.COMMANDS.RESET_LED
+      );
+      return response.success;
+    } catch (error) {
+      console.error("Reset LED failed:", error);
+      return false;
+    }
+  }
+
+  // 设置蜂鸣器状态
+  public async setBuzzer(): Promise<boolean> {
+    try {
+      const requestData = this.protocolService.createSetBuzzerRequest();
+      const response = await this.sendRequest(
+        requestData,
+        PROTOCOL_CONSTANTS.COMMANDS.SET_BUZZER
+      );
+      return response.success;
+    } catch (error) {
+      console.error("Set buzzer failed:", error);
+      return false;
+    }
+  }
+
+  // 重置蜂鸣器状态
+  public async resetBuzzer(): Promise<boolean> {
+    try {
+      const requestData = this.protocolService.createResetBuzzerRequest();
+      const response = await this.sendRequest(
+        requestData,
+        PROTOCOL_CONSTANTS.COMMANDS.RESET_BUZZER
+      );
+      return response.success;
+    } catch (error) {
+      console.error("Reset buzzer failed:", error);
+      return false;
+    }
+  }
+
   // 获取设备状态
   public async getDeviceStatus(): Promise<DeviceStatus> {
     const status: DeviceStatus = {

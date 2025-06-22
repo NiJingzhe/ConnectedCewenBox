@@ -28,17 +28,18 @@ const NeumorphicButton: React.FC<NeumorphicButtonProps> = ({
 
   const componentStyles = StyleSheet.create({
     button: {
-      borderRadius: 20, // Material 3: fully rounded for typical height
-      backgroundColor: variant === 'error' 
+      borderRadius: 1000, // Material 3: fully rounded for typical height
+      backgroundColor: variant === 'error'
         ? Colors[colorScheme].error // Material 3: error color background for error variant
         : Colors[colorScheme].tint, // Material 3: primary color background
-      paddingVertical: 10, // Material 3: common vertical padding
+      paddingVertical: 5, // Material 3: common vertical padding
       paddingHorizontal: 24, // Material 3: common horizontal padding
       alignItems: 'center',
       justifyContent: 'center',
       minWidth: 90,
       // Removed neumorphic shadow properties: shadowColor, shadowOffset, shadowOpacity, shadowRadius
       elevation: 0, // Material 3 Flat style: no elevation
+      textAlign: 'center', // Center text alignment
     },
     buttonText: {
       // Material 3: onPrimary color for primary, black text for error
@@ -66,11 +67,11 @@ const NeumorphicButton: React.FC<NeumorphicButtonProps> = ({
       disabled={disabled || isLoading}
     >
       {isLoading ? (
-        <ActivityIndicator 
+        <ActivityIndicator
           color={variant === 'error'
             ? '#000000' // Black color on red error background
             : colorScheme === 'light' ? Colors.dark.text : Colors.light.text} // Use contrast color for indicator
-          size="small" 
+          size="small"
         />
       ) : children ? (
         children

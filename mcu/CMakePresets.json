@@ -1,60 +1,17 @@
 {
-    "version": 3,
+    "version": 8,
     "configurePresets": [
         {
-            "name": "default",
-            "hidden": true,
-            "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build/${presetName}",
-		    "toolchainFile": "${sourceDir}/cmake/gcc-arm-none-eabi.cmake",
+            "name": "arm-none-eabi-gcc",
+            "displayName": "GCC 14.2.0 arm-none-eabi",
+            "description": "Using compilers: C = /usr/bin/arm-none-eabi-gcc, CXX = /usr/bin/arm-none-eabi-g++",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
             "cacheVariables": {
-            }
-        },
-        {
-            "name": "Debug",
-            "inherits": "default",
-            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_C_COMPILER": "/usr/bin/arm-none-eabi-gcc",
+                "CMAKE_CXX_COMPILER": "/usr/bin/arm-none-eabi-g++",
                 "CMAKE_BUILD_TYPE": "Debug"
             }
-        },
-        {
-            "name": "RelWithDebInfo",
-            "inherits": "default",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
-            }
-        },
-        {
-            "name": "Release",
-            "inherits": "default",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
-            }
-        },
-        {
-            "name": "MinSizeRel",
-            "inherits": "default",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "MinSizeRel"
-            }
-        }
-    ],
-    "buildPresets": [
-        {
-            "name": "Debug",
-            "configurePreset": "Debug"
-        },
-        {
-            "name": "RelWithDebInfo",
-            "configurePreset": "RelWithDebInfo"
-        },
-        {
-            "name": "Release",
-            "configurePreset": "Release"
-        },
-        {
-            "name": "MinSizeRel",
-            "configurePreset": "MinSizeRel"
         }
     ]
 }

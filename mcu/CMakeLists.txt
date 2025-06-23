@@ -56,6 +56,12 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
+    Core/Src/protocol.c
+    Core/Src/device_control.c
+    Core/Src/command_handler.c
+    Core/Src/communication.c
+    Core/Src/DS18B20.c
+    Core/Src/utils/buffer.cpp
 )
 
 include_directories(

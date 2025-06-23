@@ -22,7 +22,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "communication.h"
+#include "device_control.h"
+#include "DS18B20.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -114,9 +116,22 @@ int main(void)
   MX_USART1_UART_Init();
   MX_RTC_Init();
   MX_CRC_Init();
-  MX_TIM4_Init();
-  /* USER CODE BEGIN 2 */
-
+  MX_TIM4_Init();  /* USER CODE BEGIN 2 */
+  // 初始化通信模块
+  communication_init();
+  
+  // 初始化设备控制模块（LED, 蜂鸣器等）
+  led_init();
+  buzzer_init();
+  
+  // 初始化温度传感器
+  temperature_sensor_init();
+  
+  // 初始化报警系统
+  alarm_init();
+  
+  // 初始化温度日志系统
+  temp_log_init();
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -535,6 +550,27 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+// UART接收完成回调函数
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+    if (huart->Instance == USART1) {
+        communication_rx_complete_callback();
+    }
+}
+
+// UART发送完成回调函数
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+    if (huart->Instance == USART1) {
+        communication_tx_complete_callback();
+    }
+}
+
+// UART错误回调函数
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
+    if (huart->Instance == USART1) {
+        communication_error_callback();
+    }
+}
+
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
@@ -550,7 +586,14 @@ void StartDefaultTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    // 运行通信任务
+    communication_task();
+    
+    // 检查蜂鸣器状态（处理定时蜂鸣）
+    buzzer_get_state();
+    
+    // 短暂延时
+    osDelay(10);
   }
   /* USER CODE END 5 */
 }

@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "fuck-master-machine",
+    "name": "ConnCewenBox",
     "slug": "connectedcewenbox",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "fuckmastermachine",
+    "scheme": "conncewenbox",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {

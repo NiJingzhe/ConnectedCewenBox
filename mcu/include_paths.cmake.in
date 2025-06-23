@@ -1,0 +1,7 @@
+set(INCLUDE_PATHS 
+# Here you can define the arm-none-eabi include directories
+    /usr/arm-none-eabi/include
+    /usr/arm-none-eabi/include/c++/14.2.0
+    /usr/arm-none-eabi/include/c++/14.2.0/arm-none-eabi
+    /usr/lib/gcc/arm-none-eabi/14.2.0/include
+)
